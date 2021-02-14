@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<!--[if IE 8 ]><html class="no-js oldie ie8" lang="en"> <![endif]-->
+<!--[if IE 9 ]><html class="no-js oldie ie9" lang="en"> <![endif]-->
+<!--[if (gte IE 9)|!(IE)]><!--><html class="no-js" lang="en"> <!--<![endif]-->
+<head>
+
+   <!--- basic page needs
+   ================================================== -->
+   <meta charset="utf-8">
+	<title>Globe</title>
+	<meta name="description" content="">  
+	<meta name="author" content="">
+
+   <!-- mobile specific metas
+   ================================================== -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    
+    <style>
+        body {
+            /*background-image: radial-gradient(circle, white, white);*/
+            background-color: #111111;
+            background-repeat: no-repeat;
+            background-size: cover;
+            position: relative;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #globe {
+            width: 100vw;
+            height: 100vh;
+            cursor: pointer;
+        }
+		
+		/*
+		INFO COLLAPSIBLE
+		*/
+		.collapsible {
+		  background-color: #777;
+		  color: white;
+		  cursor: pointer;
+		  padding: 18px;
+		  width: 100%;
+		  border: none;
+		  text-align: left;
+		  outline: none;
+		  font-size: 15px;
+		}
+
+		.active, .collapsible:hover {
+		  background-color: #555;
+		}
+
+		.collapsible:after {
+		  content: '\002B';
+		  color: white;
+		  font-weight: bold;
+		  float: right;
+		  margin-left: 5px;
+		}
+
+		.active:after {
+		  content: "\2212";
+		}
+
+		.content {
+		  padding: 0 18px;
+		  max-height: 0;
+		  overflow: hidden;
+		  transition: max-height 0.2s ease-out;
+		  background-color: #f1f1f1;
+		}
+		
+		.info_collapsible {
+			position : absolute;
+			z-index: 1000;
+		}
+		/*
+		END INFO COLLAPSIBLE
+		*/
+    </style>
+
+</head>
+
+<body>
+	<div class='info_collapsible'>
+		<button class="collapsible">INFO</button>
+		<div class="content">
+			<p>
+				Description : The mesh showing real time tweet around the world.
+			</p>
+			<p>
+				Control : Use mouse to zoom and pan the globe.
+			</p>
+			<p>
+				
+				Data : 
+				<a href="https://www.pubnub.com/developers/realtime-data-streams/twitter-stream/" target="_blank">
+					https://www.pubnub.com/developers/realtime-data-streams/twitter-stream/
+				</a>
+			</p>
+			<p>
+				Github : 
+				<a href="https://github.com/mohamadsubakin/vis_globe" target="_blank">
+					https://github.com/mohamadsubakin/vis_globe
+				</a>
+			</p>
+		</div>
+	</div>
+    <div id="globe"></div>
+	<!-- VIS ========================================= -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/84/three.min.js"></script>
+    <script src="js/Detector.js"></script>
+    <script src="js/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/1.19.1/easing/EasePack.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/1.19.1/TweenLite.min.js"></script>
+    <script src="https://cdn.pubnub.com/pubnub.min.js"></script>
+    <script>
+        var main_point = [
+            [3.046327, 101.695932],
+            [30.046327, 10.695932]
+        ];
+
+        var scene, camera, renderer, controls;
+
+        var World, Icosahedron;
+
+        init();
+        animate();
+        //init_stats();
+
+        function init(){
+            var container = document.getElementById("globe");
+
+            var items = [];
+            var map_mask = [
+                new THREE.CanvasTexture(particle_texture_canvas(512, 200, 50, 130, 1)),
+                new THREE.CanvasTexture(particle_texture_canvas(512, 191, 85, 236, 1)),
+                new THREE.CanvasTexture(particle_texture_canvas(512, 145, 61, 136, 1)),
+                new THREE.CanvasTexture(particle_texture_canvas(512, 200, 85, 236, 1)),
+                new THREE.CanvasTexture(particle_texture_canvas(512, 145, 61, 200, 1))
+            ];
+            // var textureloader = new THREE.TextureLoader();
+            // var map_mask = textureloader.load("images/particle.png");
+
+            var width = container.clientWidth,
+                height = container.clientHeight;
+
+            var radius = 75;
+            var line_details = 50;
+
+            var mouse = 0;
+            var mousemove = 0;
+            var mouse_speed = 1;
+            var max_angle = Math.PI/10;
+
+            scene = new THREE.Scene();
+            //scene.background = new THREE.Color( 0xbd236e );
+
+            camera = new THREE.PerspectiveCamera( 80, width / height, 0.1, 1000);
+            camera.position.z = 200;
+            
+            controls = new THREE.OrbitControls( this.camera );
+
+            renderer = Detector.webgl? new THREE.WebGLRenderer({ alpha: true, antialias: true }) : new THREE.CanvasRenderer();
+            renderer.setSize(width, height);
+
+            container.appendChild(renderer.domElement);
+
+            //add light
+            var directionalLight = new THREE.DirectionalLight( 0xffffff, 1);
+            directionalLight.position.set(0, 200, 0);
+            scene.add(directionalLight);
+
+            var light = new THREE.AmbientLight( 0x909090);
+            scene.add(light);
+
+            //create map texture
+            var mapTextureCanvas = document.createElement("canvas");
+            var mapTextureContext = mapTextureCanvas.getContext("2d");
+            var mapTextureImage = new Image();
+            mapTextureImage.src = "image/earthspec1k.jpg";
+
+            var mapTexture = new THREE.Texture(mapTextureCanvas);
+
+            mapTextureImage.onload = function(){
+                var img_w = 1024;//avoid resize
+                var img_h = 512;
+                // mapTextureCanvas.width = mapTextureImage.width;
+                // mapTextureCanvas.height = mapTextureImage.height;
+                mapTextureCanvas.width = img_w;
+                mapTextureCanvas.height = img_h;
+                mapTextureContext.drawImage(mapTextureImage, 0, 0, img_w, img_h);
+                //process the image here
+                //get raw data
+                var rawData = mapTextureContext.getImageData(0, 0, img_w, img_h);
+                var pixelData = rawData.data;
+                //make pure black n transparent
+                for(var i = 0; i < pixelData.length; i+=4){
+                    if(pixelData[i] < 100){
+                        pixelData[i] = 0;
+                        pixelData[i+1] = 0;
+                        pixelData[i+2] = 0;
+                        pixelData[i+3] = 255;
+                    }
+                    else{
+                        pixelData[i] = 255;
+                        pixelData[i+1] = 255;
+                        pixelData[i+2] = 255;
+                        pixelData[i+3] = 0;
+                    }
+                }
+
+                rawData.data = pixelData;
+                pixelData = null;
+
+                //put back to context
+                mapTextureContext.putImageData(rawData, 0, 0);
+                mapTexture.needsUpdate = true;
+            }
+
+            //add geometry
+            var geometry = new THREE.IcosahedronGeometry(75, 5);
+            var material = new THREE.MeshPhongMaterial({
+                map : mapTexture,
+                side : THREE.DoubleSide,
+                alphaTest : 0.75,
+                color      :  new THREE.Color("rgb(10,10,10)"),
+                emissive   :  new THREE.Color("rgb(30,30,30)"),
+                specular   :  new THREE.Color("rgb(30,30,30)"),
+                shininess  :  20,
+                shading    :  THREE.FlatShading,
+                transparent: 1,
+                opacity    : 1
+            });
+
+            World = new THREE.Group();
+            Icosahedron = new THREE.Mesh(geometry, material);
+            Icosahedron.rotation.y = Math.PI;
+
+            World.add(Icosahedron);
+            World.rotation.tx = World.rotation.x;
+            scene.add(World);
+
+            window.addEventListener('resize', function(){
+                width = container.clientWidth;
+                height = container.clientHeight;
+                renderer.setSize(width, height);
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+            });
+
+            PUBNUB.init({
+                subscribe_key: 'sub-c-78806dd4-42a6-11e4-aed8-02ee2ddab7fe',
+                ssl: true
+            }).subscribe({
+                channel: 'pubnub-twitter',
+                message: function(msg) { 
+
+                    // process your last message here each 500ms.
+                    if (!msg || !msg.place || !msg.place.bounding_box)
+                        return;
+
+                    var southWest = msg.place.bounding_box.coordinates[0][0];
+                    var northEast = msg.place.bounding_box.coordinates[0][2];
+                    var center_lat = southWest[1] + (northEast[1]-southWest[1])/2;
+                    var center_lng = southWest[0] + (northEast[0]-southWest[0])/2;
+
+                    //add_data([center_lat,center_lng], main_point[parseInt(main_point.length * Math.random())],msg.text.length*0.04);
+                    add_data(
+                        [center_lat,center_lng], main_point[parseInt(main_point.length * Math.random())],
+                        (Math.pow(Math.random()*3,2))
+                    );
+
+                }
+            });
+
+            function add_data(from, to, s){
+                var item = {};
+                item.count = 0;
+                item.particle_s = 0;
+                item.delay = Math.random()*5;
+
+                var loc1 = three_2d_3d(from[0], from[1]);
+                var loc2 = three_2d_3d(to[0], to[1]);
+
+                var cloc = three_center_point(loc1, loc2);
+
+                var vc = new THREE.Vector3( );
+                var vcloc = new THREE.Vector3( cloc.x, cloc.y, cloc.z );
+                var vcros = vcloc.setLength(radius*1.5 - vcloc.length());
+
+                var bezierCurve = new THREE.CubicBezierCurve3(
+                    loc1,
+                    loc1.clone().add(vcros),
+                    loc2.clone().add(vcros),
+                    loc2
+                );
+
+                item.bezierPoints = bezierCurve.getPoints( line_details );
+
+                item.particle = gen_particle();
+                item.particle.position.set( loc1.x, loc1.y, loc1.z );
+
+                World.add(item.particle);
+
+                items.push(item);
+
+                TweenLite.to(
+                    item,
+                    5,//time in seconds
+                    {
+                        particle_s : s,
+                        ease :  Elastic.easeOut,
+                        delay : item.delay,
+                        onUpdate : function(){
+                            update_all();
+                        }
+                    }
+                );
+
+                TweenLite.to(
+                    item,
+                    10,//time in seconds
+                    {
+                        count : line_details - 0.01,
+                        ease : Power4.easeOut,
+                        delay : item.delay + 5,
+                        onUpdate : function(){
+                            update_all();
+                        },
+                        onComplete : function(){
+                            World.remove(item.particle);
+                            items.splice(items.indexOf(item), 1);
+                        }
+                    }
+                );
+
+                function update_all(){
+                    var cfloor = Math.floor(item.count);
+
+                    //point
+                    var va = item.bezierPoints[cfloor];
+                    var vb = item.bezierPoints[cfloor + 1];
+                    var vab = vb.clone().sub(va);
+
+                    vab.setLength(vab.length()*(item.count - cfloor));
+
+                    vc = va.clone().add(vab);
+                    item.particle.position.set( vc.x, vc.y, vc.z );
+
+                    item.particle.scale.x = item.particle.scale.y = item.particle_s;
+                }
+            }
+
+            function gen_particle(){
+                var rand_mask = map_mask[parseInt(map_mask.length * Math.random())];
+
+                var material = new THREE.SpriteMaterial( {
+                    map: rand_mask,
+                    //blending: THREE.NormalBlending,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                    transparent: true,
+                    vertexColors: true
+                } );
+
+                var particle = new THREE.Sprite( material );
+                particle.scale.x = particle.scale.y = 0;
+
+                return particle;
+            }
+
+            function particle_texture_canvas(size,r,g,b,a){
+                // create canvas
+                var canvas = document.createElement( 'canvas' );
+                canvas.width = size;
+                canvas.height = size;
+
+                // get context
+                var context = canvas.getContext( '2d' );
+
+                // draw gradient
+                context.rect( 0, 0, size, size );
+                var gradient = context.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+                gradient.addColorStop(0, "rgba(255,255,255," + a + ")");
+                gradient.addColorStop(.2, "rgba(" + [ r, g, b, 1 ] + ")");
+                gradient.addColorStop(1, "rgba(" + [ 0, 0, 0, 0 ] + ")");
+                // gradient.addColorStop( 0, 'rgba(255,255,255,1)' );
+                // gradient.addColorStop( 0.2, 'rgba(255,0,0,1)' );
+                // //gradient.addColorStop( 0.4, 'rgba(0,0,64,1)' );
+                // gradient.addColorStop( 1, 'rgba(0,0,0,0)' );
+                context.fillStyle = gradient;
+                context.fillRect(0, 0, size, size);
+
+                // var image = canvas.toDataURL("image/png").replace("image/png", "image/octet-stream");
+                // window.location.href=image; // it will save locally
+
+                return canvas;
+            }
+
+            function three_2d_3d(lat, lng){
+                var phi = (90 - lat) * Math.PI / 180;
+                var theta = (180 - lng) * Math.PI / 180;
+
+                var radiusr = radius + 2.5;
+
+                return new THREE.Vector3( 
+                    -radiusr * Math.sin(phi) * Math.cos(theta),
+                    radiusr * Math.cos(phi), 
+                    -radiusr * Math.sin(phi) * Math.sin(theta) 
+                    );
+            }
+
+            function three_center_point(l1, l2){
+                var c = {};
+                c.x = l1.x + (l2.x - l1.x)/2;
+                c.y = l1.y + (l2.y - l1.y)/2;
+                c.z = l1.z + (l2.z - l1.z)/2;
+
+                return c;
+            }
+        }
+
+        function animate(){
+            requestAnimationFrame(animate);
+
+            //Icosahedron.rotation.x += 0.005;
+            World.rotation.y += 0.002;
+            World.rotation.x += (World.rotation.tx - World.rotation.x)*0.01;
+
+            renderer.render(scene, camera);
+            controls.update();
+        }
+
+        function init_stats(){
+            javascript:(
+                function(){
+                    var script=document.createElement('script');
+                    script.onload=function(){
+                        var stats=new Stats();
+                        document.body.appendChild(stats.dom);
+                        requestAnimationFrame(function loop(){
+                            stats.update();
+                            requestAnimationFrame(loop)
+                        });
+                    };
+                    script.src='//rawgit.com/mrdoob/stats.js/master/build/stats.min.js';
+                    document.head.appendChild(script);
+                }
+            )()
+        }
+        
+        ///////////////////////////////////////////////////////////////////
+		//INFO COLLAPSIBLE
+		///////////////////////////////////////////////////////////////////
+		var coll = document.getElementsByClassName("collapsible");
+		var i;
+
+		for (i = 0; i < coll.length; i++) {
+		  coll[i].addEventListener("click", function() {
+			this.classList.toggle("active");
+			var content = this.nextElementSibling;
+			if (content.style.maxHeight){
+			  content.style.maxHeight = null;
+			} else {
+			  content.style.maxHeight = content.scrollHeight + "px";
+			} 
+		  });
+		}
+		///////////////////////////////////////////////////////////////////
+		//END INFO COLLAPSIBLE
+		///////////////////////////////////////////////////////////////////
+
+        
+    </script>
+
+</body>
+
+</html>
